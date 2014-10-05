@@ -1,4 +1,4 @@
-import urllib
+import urlparse
 
 ####################################################################################################
 def MetadataObjectForURL(url):
@@ -25,6 +25,6 @@ def MediaObjectsForURL(url):
 RE_VIDEO_URL = Regex('data-res="\d+" src="<video_url>"')
 def PlayVideo(url):
     page_enc = HTTP.Request(url).content
-    page = urllib.unquote(page_enc.encode('ascii')).decode('utf-8')
+    page = page_enc.decode('unicode_escape')
     video_url = RE_VIDEO_URL.search(page).group('video_url')
     return Redirect(video_url)
