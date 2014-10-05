@@ -1,0 +1,27 @@
+####################################################################################################
+def MetadataObjectForURL(url):
+    page = HTML.ElementFromURL(url)
+    title = page.xapth("//head/title")[0]
+    description = page.xpath("//head//meta[@name='description']")[0].get('content')
+    thumb = page.xpath("//head//link[@rel='image_src']")[0].get('href')
+
+    return VideoClipObject(
+        title = title,
+        summary = description,
+        thumb = thumb
+    )
+
+####################################################################################################
+def MediaObjectsForURL(url):
+    return [
+        MediaObject(
+            parts = [PartObject(key=Callback(PlayVideo, url = url))]
+        )
+    ]
+
+####################################################################################################
+RE_VIDEO_URL = Regex('data-res="\d+" src="<video_url>"')
+def PlayVideo(url):
+    page = HTTP.Request(url).content
+    video_url = RE_VIDEO_URL.search(page).group('video_url')
+    return Redirect(video_url)
