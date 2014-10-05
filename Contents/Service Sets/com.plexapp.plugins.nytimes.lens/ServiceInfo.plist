@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>URL</key>
+	<dict>
+		<key>Lens</key>
+		<dict>
+			<key>URLPatterns</key>
+			<array>
+				<string>^http://lens\.blogs\.nytimes\.com.*</string>
+			</array>
+			<key>TestURLs</key>
+			<array>
+				<string>http://lens.blogs.nytimes.com/2011/06/24/a-fathers-voice-through-kodachrome/</string>
+			</array>
+		</dict>
+	</dict>
+</dict>
+</plist>

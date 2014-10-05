@@ -1,0 +1,70 @@
+BASE_URL = 'http://video.euronews.com/'
+RE_VIDEO_URL = Regex('videofile:"(?P<video_url>[^"]+)"')
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	page = HTML.ElementFromURL(url)
+
+	if len(page.xpath('//script[@type="text/javascript"]/text()[contains(., "flv/")]')) < 1:
+		return None
+
+	# Extract the details available directly form the page.
+	title = page.xpath("//head//meta[@property='og:title']")[0].get('content')
+	description = page.xpath("//head//meta[@name='description']")[0].get('content')
+	thumb = page.xpath("//head//meta[@property='og:image']")[0].get('content')
+
+	return VideoClipObject(
+		title = title,
+		summary = description,
+		thumb = thumb
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	# If a live channel has been specified, then we should return a suitable webkit based MediaObject.
+	# This is really only used by the actual plugin when dealing with Live channels.
+	if url.find('streaming-live') != -1 or url.find('en-direct') != -1:
+		return [
+			MediaObject(
+				parts = [PartObject(key=WebVideoURL(url))]
+			)
+		]
+
+	return [
+		MediaObject(
+			video_codec = VideoCodec.VP6,
+			audio_codec = AudioCodec.MP3,
+			container = 'flv',
+			parts = [PartObject(key=Callback(PlayVideo, url = url))]
+		)
+	]
+
+####################################################################################################
+def PlayVideo(url):
+
+	page = HTTP.Request(url).content
+
+	# The source of the page actually contains a link to the associated flv file. We can simply find
+	# this by using a regular expression to find it. Then, we just redirect.
+	video_url = RE_VIDEO_URL.search(page).group('video_url') + ".flv"
+
+	return Redirect(BASE_URL + video_url)
+
+####################################################################################################
+def TestURLs():
+
+	test_urls = []
+	page = HTML.ElementFromURL('http://www.euronews.com/')
+
+	for url in page.xpath('//div[@class="iconPlay"]/parent::a/@href'):
+		if len(test_urls) < 3:
+			url = 'http://www.euronews.com' + url
+
+			if url not in test_urls:
+				test_urls.append(url)
+		else:
+			break
+
+	return test_urls

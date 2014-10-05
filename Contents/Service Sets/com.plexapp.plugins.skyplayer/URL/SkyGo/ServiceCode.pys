@@ -1,0 +1,156 @@
+httpHeaders = {'User-Agent' : 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.7; rv:14.0) Gecko/20100101 Firefox/14.0.1'}
+
+RE_TITLE = Regex('Ep(isode)? (?P<episode_number>\d+)( (?P<title>(\w+( )?)+))?')
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+    item = HTML.ElementFromURL(url, headers=httpHeaders)
+
+    # The simplest way to determine if the URL is pointing to a movie or another item is to check if
+    # it is under the 'SKYMOVIES' section. If this is the case, then we should be returning a 
+    # MovieObject, otherwise an EpisodeObject or VideoClipObject.
+    if url.startswith('http://go.sky.com/vod/content/SKYMOVIES'):
+        return MetadataObjectForMovieURL(item)
+    else:
+
+        # Attempt to determine the title.
+        title = item.xpath("//div[@class='pageTitle']/h1/text()")[0].strip()
+
+        # If the title is not accessible via this mechanism, then we can assume that the url is 
+        # pointing to a different video item, probably just a video clip
+        if title == "":
+            return MetadataObjectForEpisodeURL(item)
+        else:
+            return MetadataObjectForVideoURL(item)
+
+# This function will parse the html associated with a clip title.
+def MetadataObjectForVideoURL(item):
+
+    # Attempt to determine the title.
+    title = item.xpath("//div[@class='pageTitle']/h1/text()")[0].strip()
+
+    # Get the remaining metadata
+    metadata = MetadataForPage(item)
+
+    return VideoClipObject(
+        title = title,
+        summary = metadata['summary'],
+        thumb = metadata['thumb'],
+        duration = metadata['duration']
+    )
+
+# This function will parse the html associated with an episode title.
+def MetadataObjectForEpisodeURL(item):
+
+    # Attempt to determine the title.
+    # The format of titles for shows are as follows:
+    #    SHOW NAME Season X | EP Y TITLE
+    # or
+    #    SHOW NAME Season X | EPISODE Y
+    episode = 0
+    itemTitle = item.xpath("//div[@class='playerArea']//img/@title")[0].strip()
+
+    itemTitleComponents = RE_TITLE.match(itemTitle)
+    if itemTitleComponents:
+        itemTitleComponents = itemTitleComponents.groupdict()
+
+        if itemTitleComponents['title'] is not None:
+            title = itemTitleComponents['title']
+            episode = int(itemTitleComponents['episode_number'])
+        else:
+            title = itemTitle
+    else:
+        title = itemTitle
+
+    # Attempt to determine the name of the actual show along with the selected season
+    itemSubtitle = item.xpath("//div[@class='pageTitle']/h1/a/text()")[0]
+    itemSubtitleComponents = itemSubtitle.rsplit('Season',1)
+    if len(itemSubtitleComponents) == 2:
+        show = itemSubtitleComponents[0].strip()
+        season = int(itemSubtitleComponents[1])
+    else:
+        show = itemSubtitle
+        season = None
+
+    # Get the remaining metadata
+    metadata = MetadataForPage(item)
+
+    return EpisodeObject(
+        title = title,
+        duration = metadata['duration'],
+        summary = metadata['summary'],
+        show = show,
+        season = season,
+        index = episode,
+        thumb = metadata['thumb']
+    )
+
+# This function will parse the html associated with a movie title.
+def MetadataObjectForMovieURL(item):
+    
+    # Attempt to determine the title.
+    title = item.xpath("//div[@class='pageTitle']/h1/text()")[0].strip()
+
+    # [Optional] The director(s)
+    directors = []
+    try: 
+        directors_list = item.xpath("//div[@class='synopsis']/ul/li/span/text()")[0].strip()
+        directors = directors_list.split(', ')
+    except: pass
+
+    # [Optional] The genre(s)
+    genres = []
+    try: 
+        genres_list = item.xpath("//div[@class='synopsis']/ul/li/strong[contains(text(), 'Genres')]/../text()")[0].strip()
+        genres = genres_list.split(', ')
+    except: pass
+
+    # Get the remaining metadata
+    metadata = MetadataForPage(item)
+
+    return MovieObject(
+        title = title,
+        duration = metadata['duration'],
+        summary = metadata['summary'],
+        thumb = metadata['thumb'],
+        directors = directors,
+        genres = genres
+    )
+
+# This function will look for the basic metadata which is shared between all the different support pages. This
+# includes the summary, duration (in ms) and the absolute url to the associated thumbnail.
+def MetadataForPage(item):
+
+    # [Optional] The summary of the title
+    summary = ''
+    try: summary = item.xpath("//div[@class='synopsis']/p/text()")[0]
+    except: pass
+
+    # [Optional] The duration of the title (in milliseconds)
+    duration = 0
+    try: 
+        duration_string = item.xpath("//ul[@class='info']/li/strong[contains(text(), 'Duration')]/../text()")[0].lstrip().split(' ')[0]
+        duration = int(duration_string) * 60 * 1000
+    except: pass
+
+    # [Optional] The thumbnail of the title
+    thumb = ''
+    try: 
+        thumb_relative_path = item.xpath("//div[@class='playerArea']/div[@class='vdImage']/img")[0].get('src')
+        if thumb_relative_path.startswith('http') == False:
+            thumb = 'http://go.sky.com' + thumb_relative_path
+        else:
+            thumb = thumb_relative_path
+        thumb = thumb.replace(' ', '%20')
+    except: pass
+
+    return { 'summary': summary, 'duration': duration, 'thumb': thumb }
+
+####################################################################################################
+def MediaObjectsForURL(url):
+    return [
+      MediaObject(
+        parts = [PartObject(key=WebVideoURL(url))]
+      )
+    ]

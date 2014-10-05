@@ -1,0 +1,66 @@
+RE_DOCUMENT_FILTER = Regex('http://www.vesti.ru/doc.html\?id=[0-9]+')
+RE_VIDEO_ID = Regex('id=(?P<id>[0-9]+)')
+
+PLAYLIST_DETAILS = "http://www.vesti.ru/xml/playlist.html?type=%s"
+VH_URL = "http://player.rutv.ru/index/play/cid/%s"
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	if RE_DOCUMENT_FILTER.match(url) != None:
+		url = VideoURLFromDocumentURL(url)
+
+	video_id = RE_VIDEO_ID.search(url).group('id')
+	details = JSON.ObjectFromURL(PLAYLIST_DETAILS % video_id)[0]
+
+	return VideoClipObject(
+		title = details['title'],
+		thumb = details['picture'],
+		originally_available_at = Datetime.ParseDate(details['date1'])
+	)
+
+####################################################################################################
+def VideoURLFromDocumentURL(url):
+
+	page = HTML.ElementFromURL(url)
+	video_id = page.xpath("//div[@class='doc_photo_block ']//a[contains(@class, 'video_ico')]/@data-vid")[0]
+
+	return "http://www.vesti.ru/only_video.html?vid=%s" % video_id
+
+####################################################################################################
+@deferred
+def MediaObjectsForURL(url):
+
+	if RE_DOCUMENT_FILTER.match(url) != None:
+		url = VideoURLFromDocumentURL(url)
+
+	video_id = RE_VIDEO_ID.search(url).group('id')
+	details = JSON.ObjectFromURL(PLAYLIST_DETAILS % video_id)[0]
+
+	if details['video'].endswith('.flv'):
+		return [
+			MediaObject(
+				container = 'flv',
+				audio_codec = AudioCodec.MP3,
+				video_codec = VideoCodec.VP6,
+				parts = [PartObject(key = details['video'])]
+			)
+		]
+
+	if details['vhid'] != None:
+		media = []
+		further_details = JSON.ObjectFromURL(VH_URL % details['vhid'])
+		if not further_details:
+			raise Ex.MediaNotAvailable
+
+		for quality in further_details['path']['quality']:
+			media.append(MediaObject(
+				container = Container.MP4,
+				video_codec = VideoCodec.H264,
+				audio_codec = AudioCodec.AAC,
+				video_resolution = quality['height'],
+				bitrate = quality['bitrate'],
+				parts = [PartObject(key = quality['url'])]
+			))
+
+		return media

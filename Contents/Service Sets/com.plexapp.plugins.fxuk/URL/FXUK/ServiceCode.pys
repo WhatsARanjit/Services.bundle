@@ -1,0 +1,58 @@
+SMIL_REGEX = Regex('player.releaseURL = "([^"]+)";', Regex.DOTALL)
+SMIL_NAMESPACE = {'a': 'http://www.w3.org/2005/SMIL21/Language'}
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+    details = GetSmil(url)
+
+    try:
+        video = details.xpath('//a:video', namespaces = SMIL_NAMESPACE)[0]
+    except:
+        video = details.xpath('//a:ref', namespaces = SMIL_NAMESPACE)[0]
+
+    try:
+        tags = [ tag.strip() for tag in video.get('keywords').split(',') ]
+    except:
+        tags = []
+
+    return VideoClipObject(
+        title = video.get('title'),
+        summary = video.get('abstract'),
+        tags = tags
+    )
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+    return [
+      MediaObject(
+        container = Container.MP4,
+        video_codec = VideoCodec.H264,
+        audio_codec = AudioCodec.AAC,
+        video_resolution = 720,
+        audio_channels = 2,
+        parts = [PartObject(key = Callback(PlayVideo, url = url))]
+      )
+    ]
+
+####################################################################################################
+def PlayVideo(url):
+
+    # Obtain the SMIL associated with the URL and redirect to the embedded video URL
+    details = GetSmil(url)
+    video = details.xpath('//a:video', namespaces = SMIL_NAMESPACE)[0]
+    video_url = video.get('src')
+    return Redirect(video_url)
+
+####################################################################################################
+def GetSmil(url):
+
+    page_contents = HTTP.Request(url).content
+    smil_url = SMIL_REGEX.search(page_contents).group(1)
+    smil = XML.ElementFromURL(smil_url)
+
+    if len(smil.xpath('//a:ref[contains(@src, "Unavailable") and contains(@title, "Geographic Restriction")]', namespaces = SMIL_NAMESPACE)) > 0:
+        raise Ex.MediaGeoblocked
+    else:
+        return smil

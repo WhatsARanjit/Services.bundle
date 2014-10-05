@@ -1,0 +1,50 @@
+####################################################################################################
+def NormalizeURL(url):
+
+	url = url.split('#')[0].split('?')[0]
+
+	if '/player/' in url:
+		url = url.replace('/player/', '/')
+
+	return url
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	html = HTML.ElementFromURL(url)
+	title = html.xpath('//title/text()')[0].split("- Video's")[0].strip()
+	summary = html.xpath('//meta[@name="description"]/@content')[0]
+
+	html = HTML.ElementFromURL(url.replace('/video/', '/video/player/'))
+	thumb = html.xpath('//video[@poster]/@poster')[0]
+
+	return VideoClipObject(
+		title = title,
+		summary = summary,
+		thumb = Resource.ContentsOfURLWithFallback(thumb)
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			container = Container.MP4,
+			video_codec = VideoCodec.H264,
+			video_resolution = 'sd',
+			audio_codec = AudioCodec.AAC,
+			optimized_for_streaming = True,
+			parts = [
+				PartObject(key=Callback(PlayVideo, url=url))
+			]
+		)
+	]
+
+####################################################################################################
+@indirect
+def PlayVideo(url):
+
+	html = HTML.ElementFromURL(url.replace('/video/', '/video/player/'))
+	video_url = html.xpath('//video[@src]/@src')[0]
+
+	return IndirectResponse(VideoClipObject, key=video_url)

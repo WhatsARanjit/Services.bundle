@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>URL</key>
+	<dict>
+		<key>FXUK</key>
+		<dict>
+			<key>TestURLs</key>
+			<array>
+				<string>http://www.fxuk.com/shows/dexter/videos/1100144745001/in-the-beginning</string>
+				<string>http://www.fxuk.com/shows/falling-skies/videos/1089416251001/sanctuary-pt-2</string>
+			</array>
+			<key>URLPatterns</key>
+			<array>
+				<string>^http://www.fxuk.com/shows/.+/videos/[0-9]+/.+</string>
+			</array>
+		</dict>
+	</dict>
+</dict>
+</plist>

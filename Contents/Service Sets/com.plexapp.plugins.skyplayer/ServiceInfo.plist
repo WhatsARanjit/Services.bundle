@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>URL</key>
+	<dict>
+		<key>SkyGo</key>
+		<dict>
+			<key>TestURLs</key>
+			<array>
+				<string>http://go.sky.com/vod/content/SKYMOVIES/content/videoId/240a2baf2f90e210VgnVCM1000002c04170a________/content/default/videoDetailsPage.do</string>
+				<string>http://go.sky.com/vod/content/SKYENTERTAINMENT/Browse_by_Genre/Sci_Fi/content/videoId/ae04ac9b6d93b210VgnVCM1000002c04170a________/content/default/videoDetailsPage.do</string>
+				<string>http://go.sky.com/vod/content/SKYSPORTS/content/videoId/a00c69a2a8af0310VgnVCM1000000b43150a________/content/default/videoDetailsPage.do</string>
+			</array>
+			<key>URLPatterns</key>
+			<array>
+				<string>^http://go.sky.com/vod/content/.+/videoDetailsPage.do</string>
+			</array>
+		</dict>
+	</dict>
+</dict>
+</plist>

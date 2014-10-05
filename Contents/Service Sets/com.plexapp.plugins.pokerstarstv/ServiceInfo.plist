@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>URL</key>
+	<dict>
+		<key>PokerstarsTV</key>
+		<dict>
+			<key>TestURLs</key>
+			<array>
+				<string>http://www.pokerstars.tv/poker-video-10036-too-hot-for-tv-big-game-2-week-5.html</string>
+				<string>http://www.pokerstars.tv/poker-video-9988-online-poker-show-sunday-million-july-24th-2011.html</string>
+			</array>
+			<key>URLPatterns</key>
+			<array>
+				<string>^http://(www\.)?pokerstars\.tv/poker\-video\-\d+\-.+\.html</string>
+			</array>
+		</dict>
+	</dict>
+</dict>
+</plist>

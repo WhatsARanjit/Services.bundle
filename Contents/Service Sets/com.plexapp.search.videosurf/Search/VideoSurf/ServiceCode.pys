@@ -1,0 +1,41 @@
+VS_ID = 'plexapp'
+VS_KEY = 'd328fae46ad40d302cc79b059d84d48c'
+VS_PROVIDERS = '2,55'
+
+def get_source_url(url):
+  url = url[url.find('redirect=')+9:]
+  url = url[:url.rfind('&')]
+  return String.Unquote(url)
+
+def Search(query):
+  # Create a container to hold the results
+  c = ObjectContainer()
+
+  if query and len(query.strip()) >= 3:
+    # Compute the URL and download the JSON
+    url = 'http://apis.videosurf.com/video_search/v1.2/?client_id=%s&client_key=%s&refinement_providers=%s&query=%s&num_per_page=20' % (VS_ID, VS_KEY, VS_PROVIDERS, String.Quote(query.strip()))
+
+    try:
+      json = JSON.ObjectFromURL(url, timeout=30)
+
+      for video in json['videos']:
+        try: available_at = Datetime.FromTimestamp(video['date_added']).date()
+        except: available_at = None
+
+        source_url = get_source_url(video['source_url'])
+
+        c.add(VideoClipObject(
+          title = video['title'],
+          duration = int(video['length'])*1000,
+          summary = video['description'].strip(),
+          thumb = video['thumbnail'],
+          source_title = video['source'],
+          #source_icon = R('SourceIcon-%s.png' % video['source']),
+          originally_available_at = available_at,
+          url = source_url
+        ))
+
+    except:
+      Log.Exception("Exception adding video result")
+
+  return c

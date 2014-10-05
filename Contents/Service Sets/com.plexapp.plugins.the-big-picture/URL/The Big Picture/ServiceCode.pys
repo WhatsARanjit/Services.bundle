@@ -1,0 +1,72 @@
+####################################################################################################
+
+def NormalizeURL(url):
+  return url
+
+####################################################################################################
+
+def MetadataObjectForURL(url):
+  
+  cookies = HTTP.CookiesForURL('http://feeds.boston.com/boston/bigpicture/index')
+  request_headers = {'Cookie':cookies, 'Referer': 'http://feeds.boston.com/boston/bigpicture/index'}
+  
+  details = HTML.ElementFromURL(url, headers=request_headers)
+
+  desc = details.xpath('//meta[@property="og:description"]')[0].get('content')
+  thumb = details.xpath(".//div[@class='bpImageTop']//img")[0].get('src')
+  title = details.xpath('//meta[@property="og:title"]')[0].get('content')
+  
+  album = PhotoAlbumObject(
+      key = Callback(GetPhotos, url=url),
+      title = title,
+      summary = desc,
+      thumb = thumb
+    )
+  return album
+
+####################################################################################################
+
+def GetPhotos(url):
+  c = ObjectContainer()
+  
+  cookies = HTTP.CookiesForURL('http://feeds.boston.com/boston/bigpicture/index')
+  request_headers = {'Cookie':cookies, 'Referer': 'http://feeds.boston.com/boston/bigpicture/index'}
+
+  album_page = HTML.ElementFromURL(url, headers=request_headers)
+  first_photo = album_page.xpath('//div[@class="bpImageTop"]')[0]
+  c.add(PhotoObject(
+    key=first_photo.xpath('.//img')[0].get('src'),
+    title = 'Photo 1',
+    summary = first_photo.xpath('.//div[@class="bpCaption"]')[0].text,
+    thumb = first_photo.xpath('.//img')[0].get('src')))
+
+
+  for photo in album_page.xpath("//div[@class='bpBoth']"):
+    try:
+      try:
+        title = 'Photo '+ photo.xpath(".//div[@class='bpCaption']/div[@class='photoNum']/a")[0].text
+      except:
+        title = ''
+      summary = photo.xpath("div[@class='bpCaption']/text()")[0]
+      thumb = photo.xpath('img')[0].get('src')
+      url = photo.xpath('img')[0].get('src')
+      c.add(PhotoObject(
+      key = url,        
+      title = title,
+          summary = summary,
+          thumb = thumb))
+
+    except:
+      pass
+      
+  return c
+
+####################################################################################################
+
+def MediaObjectsForURL(url):
+  return [
+    MediaObject
+      (
+        parts = Callback(GetPhotos, url)
+      )
+    ]

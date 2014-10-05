@@ -1,0 +1,100 @@
+DETAILS_URL = 'http://www.absoluteradio.co.uk/_ajax2/media_player.php?mode=flash&id=%s'
+RE_ID = Regex("/player.*/(?P<id>\d+)/")
+
+####################################################################################################
+def NormalizeURL(url):
+
+    return url
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+    # Attempt to extract the video id from the url
+    video_id = RE_ID.search(url).group('id')
+
+    # Request the url and the details page
+    try:
+        page = HTML.ElementFromURL(url, follow_redirects=False)
+    except Ex.RedirectError, e:
+        raise Ex.MediaExpired
+
+    if len(page.xpath('//div[@id="video_container"]//*[contains(text(), "Sorry, this media is only available to UK users")]')) > 0:
+        raise Ex.MediaGeoblocked
+
+    title = page.xpath("//div[@id='video_container']/h1/text()")[0]
+    description = page.xpath("//meta[@name='description']")[0].get('content')
+
+    details_page = XML.ElementFromURL(DETAILS_URL % video_id)
+    thumb = details_page.xpath("//item/type[text() = 'image']/../src/text()")[0]
+
+    return VideoClipObject(
+        title = title,
+        summary = description,
+        thumb = thumb
+    )
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+    return [
+        MediaObject(
+          video_codec = VideoCodec.H264,
+          audio_codec = AudioCodec.AAC,
+          video_resolution = "432",
+          audio_channels = 2,
+          parts = [PartObject(key=Callback(PlayVideo, url = url, res = "hd"))]
+        ),
+        MediaObject(
+          video_codec = VideoCodec.H264,
+          audio_codec = AudioCodec.AAC,
+          video_resolution = "288",
+          audio_channels = 2,
+          parts = [PartObject(key=Callback(PlayVideo, url = url, res = "sd"))]
+        )
+    ]
+
+####################################################################################################
+@indirect
+def PlayVideo(url, res):
+
+    # Request the details pages.
+    video_id = RE_ID.search(url).group('id')
+
+    try:
+        details_page = XML.ElementFromURL(DETAILS_URL % video_id, follow_redirects=False)
+    except Ex.RedirectError, e:
+        raise Ex.MediaExpired
+
+    # Obtain the video's url and replace with the required resolution, if appropriate
+    video_url = details_page.xpath("//item/type[text() = 'video']/../src/text()")[0]
+    if res == "hd":
+        video_url = video_url.replace('sd.mp4','hd.mp4')
+
+    (streamer, file) = video_url.split('mp4:',1)
+    return IndirectResponse(VideoClipObject, key = RTMPVideoURL(url = streamer, clip = 'mp4:' + file))
+
+####################################################################################################
+def TestURLs():
+
+    test_urls = []
+
+    # Request a page which should contain a collection of videos
+    page = HTML.ElementFromURL("http://www.absoluteradio.co.uk/video/tags/artist,interview/")
+    results = page.xpath("//div[@id='main_content']//p[@class='clip_result']")
+    for item in results:
+
+        url = item.xpath(".//a")[0].get('href')
+        if url.startswith("http://") == False:
+            url = "http://www.absoluteradio.co.uk" + url
+
+        # Ensure that we don't grab any audio sessions...
+        description = item.xpath(".//span[@class='result_desc']/text()")[0].strip()
+        if description.find("Audio") != -1:
+            continue
+
+        test_urls.append(url.replace(' ', '+'))
+
+        if len(test_urls) > 2:
+            break
+
+    return test_urls

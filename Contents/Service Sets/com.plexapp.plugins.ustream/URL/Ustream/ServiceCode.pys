@@ -1,0 +1,180 @@
+# Test live URL for PMS: http://localhost:32400/system/services/url/lookup?url=http%3A//www.ustream.tv/channel/live-iss-stream
+# Test recorded URL for PMS: http://localhost:32400/system/services/url/lookup?url=http%3A//www.ustream.tv/recorded/23088640
+# API: http://api.ustream.tv/[html|json|xml|php]/[subject]/[subjectUID|scope]/[command]/[otherparams]/?page=[n]&limit=[l]&key=[devkey]
+
+####################################################################################################
+USTREAM_REC_URL = 'http://www.ustream.tv/recorded/%s'
+USTREAM_IPHONE_URL = 'http://iphone-streaming.ustream.tv/uhls/%s/streams/live/iphone/playlist.m3u8?appType=11&appVersion=2'
+USTREAM_KEY = '8C8687A40DFFF62C23AAE5E021BD2BFE'
+USTREAM_CH_JSON = 'http://api.ustream.tv/json/channel/%s/getInfo?key=%s'
+USTREAM_REC_JSON = 'http://api.ustream.tv/json/video/%s/getInfo?key=%s'
+
+RE_RECORDED_ID = Regex('/recorded/(\d+)')
+RE_PROGRESSED = Regex('#PROGRESSED (\d+)%')
+
+####################################################################################################
+def NormalizeURL(url):
+
+	if '/recorded/' in url:
+		# For recorded videos, the video ID should be in the URL...
+		video_id = RE_RECORDED_ID.search(url)
+
+		if not video_id:
+			raise Ex.MediaNotAvailable
+
+		url = USTREAM_REC_URL % video_id.group(1)
+
+	return url
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	if '/recorded/' in url:
+		# For recorded videos, the video ID should be in the URL...
+		video_id = RE_RECORDED_ID.search(url)
+
+		if not video_id:
+			raise Ex.MediaNotAvailable
+
+		json = JSON.ObjectFromURL(USTREAM_REC_JSON % (video_id.group(1), USTREAM_KEY))
+
+	else:
+		# For live channels, look for a video ID in the HTML...
+		try:
+			html = HTML.ElementFromURL(url)
+		except:
+			raise Ex.MediaNotAvailable
+
+		content_id = html.xpath('//a[@data-content-id]')
+
+		if len(content_id) < 1:
+			raise Ex.MediaNotAvailable
+
+		video_id = content_id[0].get('data-content-id')
+		json = JSON.ObjectFromURL(USTREAM_CH_JSON % (video_id, USTREAM_KEY))
+
+	if not json['results']:
+		if json['msg'] and 'password protected' in json['msg']:
+			raise Ex.MediaNotAuthorized
+		else:
+			raise Ex.MediaNotAvailable
+
+	video = json['results']
+	title = video['title']
+
+	if 'status' in video and video['status'] == 'offline':
+		# Playback will fail if a live channel happens to be offline when played. Log this.
+		Log('%s is currently offline.' % title)
+		raise Ex.LiveMediaNotStarted
+
+	summary = String.StripTags(video['description']) if 'description' in video and video['description'] else None
+
+	try:
+		thumb = video['imageUrl']['medium']
+	except:
+		thumb = ''
+
+	return VideoClipObject(
+		title = title,
+		summary = summary,
+		thumb = Resource.ContentsOfURLWithFallback(url=thumb)
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	if '/recorded/' in url:
+		return [
+			MediaObject(
+				parts = [PartObject(key=Callback(PlayRecorded, url=url))],
+				container = Container.MP4,
+				video_codec = VideoCodec.H264,
+				video_resolution = 'sd',
+				audio_codec = AudioCodec.AAC,
+				audio_channels = 2,
+				optimized_for_streaming = True
+			)
+		]
+	else:
+		return [
+			MediaObject(
+				parts = [PartObject(key=HTTPLiveStreamURL(Callback(PlayLive, url=url)))],
+				container = 'mpegts',
+				video_codec = VideoCodec.H264,
+				video_resolution = '480',
+				audio_codec = AudioCodec.AAC,
+				audio_channels = 2,
+				optimized_for_streaming = True
+			)
+		]
+
+####################################################################################################
+@indirect
+def PlayRecorded(url):
+
+	if '/recorded/' in url:
+		video_id = RE_RECORDED_ID.search(url)
+
+		if not video_id:
+			raise Ex.MediaNotAvailable
+
+		json = JSON.ObjectFromURL(USTREAM_REC_JSON % (video_id.group(1), USTREAM_KEY))
+
+		if json['results'] and 'liveHttpUrl' in json['results']:
+			return IndirectResponse(VideoClipObject, key=json['results']['liveHttpUrl'])
+		elif json['msg'] and 'password protected' in json['msg']:
+			raise Ex.MediaNotAuthorized
+
+	raise Ex.MediaNotAvailable
+
+####################################################################################################
+def PlayLive(url):
+
+	try:
+		html = HTML.ElementFromURL(url)
+	except Ex.HTTPError, e:
+		if e.code == 404:
+			raise Ex.MediaNotAvailable
+
+	content_id = html.xpath('//a[@data-content-id]')
+
+	if len(content_id) < 1:
+		raise Ex.MediaNotAvailable
+
+	video_id = content_id[0].get('data-content-id')
+
+	if StreamIsReady(video_id):
+		return Redirect(USTREAM_IPHONE_URL % video_id)
+	else:
+		raise Ex.LiveMediaNotStarted
+
+####################################################################################################
+def StreamIsReady(video_id, i=0, progressed=0):
+
+	url = USTREAM_IPHONE_URL % video_id
+
+	Log(' --> url: %s' % url)
+	Log(' -->   i: %d' % i)
+
+	if i < 20:
+		try:
+			playlist = HTTP.Request(url, cacheTime=0, sleep=1.0).content
+		except:
+			return False
+
+		if '#PROGRESSED' in playlist:
+			progress = int(RE_PROGRESSED.search(playlist).group(1))
+			Log(' --> progress: %d' % progress)
+
+			if progress > progressed:
+				return StreamIsReady(video_id=video_id, i=i, progressed=progress)
+			else:
+				return StreamIsReady(video_id=video_id, i=i+1, progressed=progress)
+		else:
+			i = 99 # Fix Laika HLS sillyness
+			return True
+	else:
+		return False
+
+####################################################################################################
+PlayVideo = PlayLive

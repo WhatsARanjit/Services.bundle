@@ -1,0 +1,51 @@
+VIDEO_DETAILS_URL = 'http://c.brightcove.com/services/viewer/htmlFederated?&width=1000&height=512&playerID=%s&@videoPlayer=%s'
+RE_JSON = Regex('var experienceJSON = (.+)};')
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	details = JSONFromURL(url)
+
+	return VideoClipObject(
+		title = details['displayName'],
+		summary = details['shortDescription'],
+		thumb = details['videoStillURL']
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			container = Container.MP4,
+			video_codec = VideoCodec.H264,
+			audio_codec = AudioCodec.AAC,
+			audio_channels = 2,
+			parts = [PartObject(key=Callback(PlayVideo, url=url))]
+		)
+	]
+
+####################################################################################################
+@indirect
+def PlayVideo(url):
+
+	details = JSONFromURL(url)
+	return IndirectResponse(VideoClipObject, key=details['FLVFullLengthURL'])
+
+####################################################################################################
+def JSONFromURL(url):
+
+	page = HTML.ElementFromURL(url)
+
+	# Determine the video player and player ids
+	player_id = page.xpath("//object[@class='BrightcoveExperience']/param[@name='playerID']/@value")
+	video_player = page.xpath("//object[@class='BrightcoveExperience']/param[@name='@videoPlayer']/@value")
+
+	if len(player_id) < 1 or len(video_player) < 1:
+		raise Ex.MediaNotAvailable
+
+	# Request the appropriate Brightcover URL which will contain the requested information.
+	video_details_page = HTTP.Request(VIDEO_DETAILS_URL % (player_id[0], video_player[0])).content
+	experience = RE_JSON.search(video_details_page).group(1) + '}'
+
+	return JSON.ObjectFromString(experience)['data']['programmedContent']['videoPlayer']['mediaDTO']

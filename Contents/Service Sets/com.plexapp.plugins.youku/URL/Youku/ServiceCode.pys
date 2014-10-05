@@ -1,0 +1,117 @@
+PLAYLIST_URL = 'http://v.youku.com/player/getPlayList/VideoIDS/%s'
+M3U8_URL = 'http://pl.youku.com/playlist/m3u8?vid=%s&type=%s&ts=%d'
+YOUKU_FORMATS = [
+	{'resolution': '288',  'bitrate': 200,  'stream_type': 'flv'},
+	{'resolution': '378',  'bitrate': 500,  'stream_type': 'mp4'},
+	{'resolution': '622',  'bitrate': 1000, 'stream_type': 'hd2'},
+	{'resolution': '1080', 'bitrate': 1500, 'stream_type': 'hd3'}
+]
+
+HTTP_HEADERS = {'User-Agent': 'Mozilla/5.0 (iPad; CPU OS 6_0_1 like Mac OS X) AppleWebKit/536.26 (KHTML, like Gecko) Version/6.0 Mobile/10A523 Safari/8536.25'}
+
+RE_VIDEO_ID_URL = Regex('v_show/id_(?P<video_id>[^.]+)(\.html)?')
+
+####################################################################################################
+def NormalizeURL(url):
+
+	return url.split('?')[0]
+
+####################################################################################################
+def GetVideoData(url):
+
+	video_id = RE_VIDEO_ID_URL.search(url)
+
+	if not video_id:
+		raise Ex.MediaNotAvailable
+	else:
+		video_id = video_id.group('video_id')
+
+	try:
+		playlist = JSON.ObjectFromURL(PLAYLIST_URL % video_id, headers=HTTP_HEADERS, cacheTime=CACHE_1HOUR)
+	except:
+		raise Ex.MediaNotAvailable
+
+	if 'data' not in playlist or len(playlist['data']) < 1:
+		raise Ex.MediaNotAvailable
+
+	return playlist['data'][0]
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	data = GetVideoData(url)
+
+	try:
+		html = HTML.ElementFromURL(url, headers=HTTP_HEADERS, cacheTime=CACHE_1HOUR)
+	except:
+		raise Ex.MediaNotAvailable
+
+	return VideoClipObject(
+		title = data['title'],
+		summary = html.xpath('//meta[@name="description"]/@content')[0],
+		thumb = Resource.ContentsOfURLWithFallback(data['logo']),
+		duration = int(float(data['seconds']) * 1000)
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			parts = [PartObject(key = HTTPLiveStreamURL(Callback(PlayVideo, url=url, target_stream_type=fmt['stream_type'])))],
+			video_resolution = fmt['resolution'],
+			bitrate = fmt['bitrate'],
+			audio_channels = 2,
+			optimized_for_streaming = True
+		) for fmt in reversed(YOUKU_FORMATS)
+	]
+
+####################################################################################################
+def GetStreamType(stream_types, target_stream_type):
+
+	Log.Debug("GetStreamType: looking for '%s' in %s", target_stream_type, stream_types)
+
+	index = None
+	stream_type = None
+
+	for i, j in enumerate(YOUKU_FORMATS):
+		if j['stream_type'] == target_stream_type:
+			index = i
+			break
+
+	if index is None:
+		Log.Warn("GetStreamType: could not find index for '%s'", target_stream_type)
+		return fmt
+
+	# search order: target stream type, lower resolutions (descending), higher resolutions (ascending)
+	indices = list(range(len(YOUKU_FORMATS)))
+	indices[:index + 1] = list(reversed(indices[:index + 1]))
+
+	for i in indices:
+		st = YOUKU_FORMATS[i]['stream_type']
+		if st in stream_types:
+			stream_type = st
+			break
+
+	Log.Debug("GetStreamType: returning '%s'", stream_type)
+
+	return stream_type
+
+####################################################################################################
+@indirect
+def PlayVideo(url, target_stream_type='hd3'):
+
+	Log.Debug("PlayVideo: url='%s', target_stream_type='%s'", url, target_stream_type)
+
+	data = GetVideoData(url)
+
+	stream_type = GetStreamType(data['streamtypes'], target_stream_type)
+	if not stream_type:
+		raise Ex.MediaNotAvailable
+
+	video_url = M3U8_URL % (data['videoid'], stream_type, Datetime.TimestampFromDatetime(Datetime.Now()))
+
+	Log.Debug("PlayVideo: returning '%s'", video_url)
+
+	return IndirectResponse(VideoClipObject, key=video_url)
+

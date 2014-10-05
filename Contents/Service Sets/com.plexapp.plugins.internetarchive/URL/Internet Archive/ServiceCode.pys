@@ -1,0 +1,524 @@
+import re
+
+METADATA_BASE_URL = "http://archive.org"
+BASE_URL = "http://www.archive.org"
+INTERNET_ARCHIVE_LOGO = "http://bib.archive.org/files/2011/09/archive-logo-notext-300x300.png"
+
+####################################################################################################
+def NormalizeURL(url):
+
+    return url
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+    xml_url = GetMetadata(url)
+
+    if not xml_url:
+        raise Ex.MediaNotAvailable
+
+    meta_xml = XML.ElementFromURL(xml_url)
+
+    '''gather the metadata that doesn't vary between media types'''
+    rating = GetRating(url)
+    title = meta_xml.xpath('//title')[0].text
+
+    creator = meta_xml.xpath('//creator')
+    artist = creator[0].text if len(creator) > 0 else None
+
+    ''' Album > Track '''
+    if '#Track' in url:
+
+        (url, query) = url.split('?')
+        files = String.ParseQueryString(query)
+        files_xml = XML.ElementFromURL(FileListURL(url))
+
+        try:
+            track_title = files_xml.xpath('//file[@name="%s"]/title/text()' % files['file'][0])[0]
+        except:
+            # Some derivatives are missing the <title> attribute. If this is the case, we try to find the
+            # track title by looking for the same track, but in a different format.
+            track_title = files_xml.xpath('//file[contains(@name, "%s")]/title/text()' % files['file'][0].rsplit('.', 1)[0])[0]
+
+        try:
+            duration = files_xml.xpath('//file[@name="%s"]/length/text()' % files['file'][0])[0]
+            if not ':' in duration:
+                duration = int(float(duration)*1000)
+            else:
+                duration = Datetime.MillisecondsFromString(duration)
+        except:
+            duration = None
+
+        return TrackObject(
+            title = track_title,
+            artist = artist,
+            album = title,
+            duration = duration,
+            thumb = Callback(Thumb, url=url)
+        )
+
+    summary = None
+    for summary_node in ['//description', '//notes']:
+        try:
+            summary = meta_xml.xpath(summary_node)[0].text
+            break
+        except: pass
+
+    '''gather the media-type specific metadata and return the appropriate object'''
+    if meta_xml.xpath('//mediatype')[0].text in ['audio', 'etree']:
+        return AlbumObject(
+            key = Callback(GetTracks, url=url),
+            title = title,
+            summary = summary,
+            artist = artist,
+            originally_available_at = Datetime.ParseDate(meta_xml.xpath('//publicdate')[0].text).date(),
+            rating = rating,
+            thumb = Callback(Thumb, url=url)
+        )
+    elif meta_xml.xpath('//mediatype')[0].text == 'movies':
+        '''year is about the only useful date info (usually available) that applies to the actual release of the video
+        as opposed to the upload date'''
+        year = meta_xml.xpath('.//year/text()')
+        if len(year) > 0:
+            year = int(year[0])
+        else:
+            year = None
+
+        runtime = meta_xml.xpath('//runtime/text()')
+        if len(runtime) > 0:
+            try:
+                duration = (int(re.search('([0-9]+) minutes ', runtime).group(1))*60 + int(re.search('([0-9]+) seconds', runtime[0]).group(1)))*1000
+            except:
+                duration = None
+        else:
+            duration = None
+
+        return VideoClipObject(
+            url = '%s#video' % (url),
+            title = title,
+            summary = summary,
+            year = year,
+            rating = rating,
+            duration = duration,
+            thumb = Callback(Thumb, url=url)
+        )
+    else:
+        '''if it's not audio or video, I have no idea what it is or how to handle it (yet)'''
+        raise Ex.MediaNotAvailable
+
+####################################################################################################
+def Thumb(url=None):
+
+  if not url:
+    return None
+
+  if url[-4:] == ".jpg":
+    thumb_url = url
+  else:
+    try:
+      page = HTML.ElementFromURL(url)
+
+      try:
+        thumb_url = METADATA_BASE_URL + page.xpath('.//table[@class="fileFormats"]//a[contains(@href, ".jpg")]')
+      except:
+        try:
+          thumb_url = page.xpath('//img[@title="[item image]"]')[0].get('src')
+          if thumb_url[-4:] != ".jpg":
+            raise ThumbError('Not a jpg')
+          else:
+            pass
+        except:
+          try:
+            '''grab the list of files to find an appropriate thumbnail'''
+            files = XML.ElementFromURL(FileListURL(url))
+            '''take the first available jpeg thumbnail'''
+            thumb_url = DownloadURL(url) + files.xpath('//file[contains(@name, ".jpg")]')[0].get('name')
+          except:
+            thumb_url = INTERNET_ARCHIVE_LOGO
+    except:
+      thumb_url = INTERNET_ARCHIVE_LOGO
+
+  data = HTTP.Request(thumb_url, cacheTime=CACHE_1DAY).content
+  return DataObject(data, 'image/jpeg')
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+    if '#Track' in url:
+        '''if the url has a "#Track" tag added, we know that we need to return MediaObjects
+        for the given TrackObject'''
+        return MediaObjectsForTrack(url) 
+    elif '#video' in url:
+        url = url.replace("#video", "")
+        return VideoObjectsForURL(url)
+    else: ### THIS IS NOT SOMETHING TO COPY AND PASTE TO OTHER SERVICES WITHOUT SERIOUS THOUGHT ###
+        '''We don't know in advance whether it should be audio or video. The channel(s) should tell
+        us which it should be, therefore this must come from the bookmarklet and we can get away with
+        making an http request to find out.'''
+        page = HTML.ElementFromURL(url)
+        media_type = page.xpath('.//div[@class="breadcrumbs"]/a')[0].get('href').split('/')[-1]
+        if media_type == 'movies':
+            return VideoObjectsForURL(url)
+        elif media_type == 'audio':
+            '''return MediaObjects for the given Album, where each part is a track'''
+            Log('ERROR - This URL is an audio page which should have been caught and broken into tracks. ')
+    return
+
+####################################################################################################
+def GetMetadata(url):
+
+    try:
+        page = HTML.ElementFromURL(url)
+    except:
+        return None
+
+    xml_url = None
+    size = 0
+
+    for meta in page.xpath('//table[contains(@class, "fileFormats")]//a[contains(@href, "_meta.xml")]'):
+        file_size = ConvertToBytes(meta.xpath('./text()')[0])
+
+        if file_size > size:
+            xml_url = METADATA_BASE_URL + meta.get('href')
+            size = file_size
+
+    return xml_url
+
+####################################################################################################
+def ConvertToBytes(size_string):
+
+    ''' crude converter for file sizes '''
+    size_string = size_string.replace(',', '').strip()
+    if " KB" in size_string:
+        return float(size_string.split(' ')[0])*1000
+    elif " B" in size_string:
+        return float(size_string.split(' ')[0])
+    else: #just in case
+        return float(size_string.split(' ')[0])
+
+####################################################################################################    
+def GetTracks(url):
+
+    oc = ObjectContainer()
+
+    count = 0
+    files = XML.ElementFromURL(FileListURL(url))
+    tracks = {}
+
+    for file in files.xpath('//file'):
+        try:
+            format = file.xpath('./format')[0].text.lower()
+        except:
+            continue
+
+        format_is_mp3 = format.endswith(' mp3')
+        format_is_ogg = format == 'ogg vorbis'
+        format_is_flac = format == 'flac'
+
+        if format_is_mp3 or format_is_ogg or format_is_flac:
+            try:
+                file_name = file.get('name')
+
+                source = file.get('source').lower()
+
+                if source == 'original':
+                    track_id = file_name
+                else:
+                    track_id = file.xpath('./original')[0].text
+
+            except:
+                continue
+
+            if not track_id in tracks:
+                tracks[track_id] = {'files': []}
+                count = count + 1
+
+            tracks[track_id]['files'].append(file_name)
+
+            try:
+                index = int(file.xpath('./track')[0].text)
+                tracks[track_id]['index'] = index
+            except:
+                if not 'index' in tracks[track_id]:
+                    try:
+                        '''parse the original filename to get the track number'''
+                        original = str(file.xpath('./original')[0].text).rsplit('.', 1)[0]
+                        tracks[track_id]['index'] = int(original[-2:])                  
+                    except:
+                        '''try to grab a track number from the beginning of the title, so that we can keep the tracks in order'''
+                        try:
+                            count = int(re.search("^([0-9]+)", file.xpath('./title')[0].text).group(1))
+                            tracks[track_id]['index'] = count
+                        except:
+                            pass
+
+            try:
+                title = file.xpath('./title')[0].text
+                tracks[track_id]['title'] = title
+            except:
+                if not 'title' in tracks[track_id]:
+                    '''if the "title" is not specified, use the filename instead'''
+                    title = file_name
+                    '''remove the extension'''
+                    tracks[track_id]['title'] = title[:title.find('.')]
+
+            if not 'album' in tracks[track_id]:
+                try:
+                    tracks[track_id]['album'] = file.xpath('./album')[0].text
+                except:
+                    pass
+
+            if not 'artist' in tracks[track_id]:
+                try:
+                    tracks[track_id]['artist'] = file.xpath('./creator')[0].text
+                except:
+                    pass
+
+            if not 'duration' in tracks[track_id]:
+                try: 
+                    length = file.xpath('./length')[0].text
+
+                    if ':' in length:
+                        '''format is mm:ss'''
+                        tracks[track_id]['duration'] = (int(length.split(':')[0])*60 + int(length.split(':')[1]))*1000
+                    else:
+                        '''format is float(s)'''
+                        tracks[track_id]['duration'] = int(float(length)*1000) 
+                except:
+                    pass
+
+
+    sort_by_title = False
+
+    for track_id in tracks:
+        query = ''
+        for file in tracks[track_id]['files']:
+            if not query:
+                query = '?'
+            else:
+                query = query + '&'
+
+            query = query + "file=" + file 
+
+        track_url = url + query + '#Track'
+
+        title = tracks[track_id]['title']
+
+        album = None
+        if 'album' in tracks[track_id]:
+           album = tracks[track_id]['album']
+
+        artist = None
+        if 'artist' in tracks[track_id]:
+            artist = tracks[track_id]['artist']
+
+        duration = None
+        if 'duration' in tracks[track_id]:
+            duration = tracks[track_id]['duration']
+
+        index = None
+        if 'index' in tracks[track_id]:
+            index = tracks[track_id]['index']
+        else:
+            sort_by_title = True
+
+        oc.add(TrackObject(
+            url = track_url,
+            title = title,
+            album = album,
+            artist = artist,
+            index = index,
+            duration = duration,
+            thumb = Callback(Thumb, url = url)
+        ))
+
+
+    if sort_by_title:
+        ''' If some track lacks track number, sort by title instead '''
+        oc.objects.sort(key = lambda obj: obj.title)
+    else:
+        ''' Sort by track number '''
+        oc.objects.sort(key = lambda obj: obj.index)
+
+    '''It's possible that the track list simply contains types which we don't support (e.g. Shorten)'''
+    if len(oc) < 1:
+        return ObjectContainer(
+            header = "No Tracks Found", 
+            message = "No tracks with supported filetypes were found"
+        )
+
+    return oc
+
+####################################################################################################
+def MediaObjectsForTrack(url):
+
+    url = url[:url.find("#")]
+    [url, query] = url.split("?")
+
+    files = String.ParseQueryString(query)
+
+    flac_file = None
+    ogg_file = None
+    mp3_file = None
+
+    for file in files['file']:
+        if file.endswith('flac'):
+            flac_file = file
+        elif file.endswith('ogg'):
+            ogg_file = file
+        elif file.endswith('mp3'):
+            # The first one has the highest bitrate
+            if not mp3_file:
+                mp3_file = file
+
+    media_objects = []
+
+    if mp3_file:
+        media_objects.append(
+            MediaObject(
+                parts = [
+                    PartObject(
+                        key = Callback(PlayAudio, url=url, file=mp3_file, ext='mp3')
+                    )
+                ],
+                bitrate = 192,
+                container = Container.MP3,
+                audio_codec = AudioCodec.MP3,
+                audio_channels = 2
+            )
+        )
+
+    if flac_file:        
+        media_objects.append(
+            MediaObject(
+                parts = [
+                    PartObject(
+                        key = Callback(PlayAudio, url=url, file=flac_file, ext='flac')
+                    )
+                ],
+                bitrate = 256,
+                container = Container.FLAC,
+                audio_codec = AudioCodec.FLAC,
+                audio_channels = 2
+            )
+        )
+
+    if ogg_file:
+        media_objects.append(
+            MediaObject(
+                parts = [
+                    PartObject(
+                        key = Callback(PlayAudio, url=url, file=ogg_file, ext='ogg')
+                    )
+                ],
+                bitrate = 128,
+                container = Container.OGG,
+                audio_codec = AudioCodec.VORBIS,
+                audio_channels = 2
+            )
+        )
+
+    return media_objects
+
+####################################################################################################
+def PlayAudio(url, file):    
+
+    media_url = DownloadURL(url) + file
+    return Redirect(media_url)
+
+####################################################################################################
+def FileListURL(url):
+
+    try:
+        page = HTML.ElementFromURL(url)
+    except:
+        raise Ex.MediaNotAvailable
+
+    '''It's possible that there are more than one file list available. However, we want to ensure 
+       that in this case, we return at least one which is valid. We've found that some albums have
+       broken URL links associated with them. Therefore we should at least try and validate first.'''
+    track_list_urls = page.xpath('.//table[contains(@class, "fileFormats")]//a[contains(@href, "_files.xml")]')
+
+    for file_url in track_list_urls:
+        try:
+            track_list_url = BASE_URL + file_url.get('href')
+            HTTP.Request(track_list_url).headers
+            return track_list_url
+        except: pass
+
+    return None
+
+####################################################################################################
+def GetRating(url):
+
+    try:
+        page = HTML.ElementFromURL(url)
+        reviews_url = page.xpath('.//table[@class="fileFormats"]/a[contains(@href, "_reviews.xml")]')[0]
+        reviews = XML.ElementFromURL(reviews_url)
+        '''Get the Average Rating and multiply it by 2 to change it to Out-Of-10 rather than Out-Of-5'''
+        rating = float(reviews.xpath('//info/avg_rating')[0])*2
+        return rating
+    except:
+        return None
+
+####################################################################################################
+def DownloadURL(url):
+
+    download_url = url.replace('/details/', '/download/') + '/'
+    return download_url
+
+####################################################################################################
+def VideoObjectsForURL(url):
+
+    media_objects = []
+
+    for resolution in ['720', '480', '360', '240']:
+        media_objects.append(
+            MediaObject(
+                container = Container.MP4,
+                video_codec = VideoCodec.H264,
+                audio_codec = AudioCodec.AAC,
+                audio_channels = 2,
+                optimized_for_streaming = True,
+                video_resolution = int(resolution),
+                parts = [
+                    PartObject(
+                        key = Callback(PlayVideo, url=url, resolution=resolution)
+                    )
+                ]
+            )
+        )
+
+    return media_objects
+
+####################################################################################################
+def PlayVideo(url, resolution='720', **kwargs):
+
+    resolution = int(resolution)
+
+    xml_url = FileListURL(url)
+    files = XML.ElementFromURL(xml_url)
+
+    min_diff_found = 1000000 # Some huge number to get it started
+
+    for file in files.xpath("//file"):
+        name = file.xpath("./@name")[0]
+
+        if name.lower().endswith('.mp4'):
+            try:
+                diff = abs(resolution - int(file.xpath(".//height/text()")[0]))
+            except:
+                # No width or height could be found
+                # That usually means that there is only one
+                # MP4 variant
+                # We'll use this one by force
+                file_name = name
+                break
+
+            if diff < min_diff_found:
+                file_name = name
+                min_diff_found = diff
+
+    media_url = xml_url[:xml_url.rfind("/") + 1] + file_name
+
+    return Redirect(media_url)

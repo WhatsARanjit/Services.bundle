@@ -1,0 +1,92 @@
+RE_VID_ID = Regex('(?:vid=|id/|episode/)(\d+)')
+RE_HTML5_VID = Regex('var html5 = (\{.+?\});')
+
+JSON_URL = 'http://player.rutv.ru/iframe/play/id/%s'
+IFRAME_URL = 'http://player.rutv.ru/iframe/video/id/%s'
+BASE_URL = 'http://rutv.ru'
+
+####################################################################################################
+def NormalizeURL(url):
+
+	if not '/episode/' in url:
+		html = HTML.ElementFromURL(url)
+		swf_url = html.xpath('//meta[@property="og:video"]')
+
+		if len(swf_url) < 1:
+			return None
+
+		vid_id = RE_VID_ID.search(swf_url[0].get('content')).group(1)
+		url = 'http://rutv.ru/brand/show/episode/%s' % vid_id
+
+	url = url.split('/viewtype/')[0]
+
+	return url
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	vid_id = RE_VID_ID.search(url)
+
+	if not vid_id:
+		raise Ex.MediaNotAvailable
+
+	json_obj = JSON.ObjectFromURL(JSON_URL % vid_id.group(1))['data']['playlist']['medialist'][0]
+
+	return VideoClipObject(
+		title = json_obj['title'],
+		summary = json_obj['anons'],
+		thumb = json_obj['picture'],
+		duration = int(json_obj['duration']) * 1000
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			parts = [
+				PartObject(
+					key = HTTPLiveStreamURL(Callback(PlayVideo, url=url))
+				)
+			],
+			video_resolution = 'sd',
+			audio_channels = 2
+		)
+	]
+
+####################################################################################################
+@indirect
+def PlayVideo(url, **kwargs):
+
+	vid_id = RE_VID_ID.search(url)
+
+	if not vid_id:
+		raise Ex.MediaNotAvailable
+
+	data = HTTP.Request(IFRAME_URL % vid_id.group(1)).content
+	json = RE_HTML5_VID.search(data)
+
+	if not json:
+		raise Ex.MediaNotAvailable
+
+	json_obj = JSON.ObjectFromString(json.group(1))
+	video_url = json_obj['video']
+
+	return IndirectResponse(VideoClipObject, key=video_url)
+
+####################################################################################################
+def TestURLs():
+
+	test_urls = []
+	data = HTML.ElementFromURL(BASE_URL + '/brand/brandlist')
+
+	for vid in data.xpath('//div[@class="video-list-item-img"]/a[contains(@href, "/episode/")]/@href'):
+		url = '%s%s' % (BASE_URL, vid)
+
+		if url not in test_urls:
+			test_urls.append(url)
+
+		if len(test_urls) > 2:
+			break
+
+	return test_urls

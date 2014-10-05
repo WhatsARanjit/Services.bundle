@@ -1,0 +1,74 @@
+MediaObject.container = Container.MP4
+MediaObject.video_codec = VideoCodec.H264
+MediaObject.audio_codec = AudioCodec.AAC
+MediaObject.audio_channels = 2
+MediaObject.optimized_for_streaming = True
+
+####################################################################################################
+def NormalizeURL(url):
+
+	return url.split('?')[0]
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	try:
+		html = HTML.ElementFromURL(url)
+	except:
+		raise Ex.MediaNotAvailable
+
+	title = html.xpath('//meta[@property="og:title"]/@content')[0]
+	summary = html.xpath('//meta[@property="og:description"]/@content')[0]
+
+	parsely = html.xpath('//meta[@name="parsely-page"]/@content')[0]
+	json_obj = JSON.ObjectFromString(parsely)
+	thumb = json_obj['image_url']
+	originally_available_at = Datetime.ParseDate(json_obj['pub_date']).date()
+
+	return VideoClipObject(
+		title = title,
+		summary = summary,
+		thumb = Resource.ContentsOfURLWithFallback(url=thumb),
+		originally_available_at = originally_available_at
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			parts = [
+				PartObject(key=Callback(PlayVideo, url=url, res='720'))
+			],
+			video_resolution = '720'
+		),
+		MediaObject(
+			parts = [
+				PartObject(key=Callback(PlayVideo, url=url, res='360'))
+			],
+			video_resolution = '360'
+		)
+	]
+
+####################################################################################################
+@indirect
+def PlayVideo(url, res):
+
+	try:
+		html = HTML.ElementFromURL(url)
+	except:
+		raise Ex.MediaNotAvailable
+
+	if res == '720':
+		video_url = html.xpath('//meta[@property="og:video"]/@content')
+
+		if len(video_url) > 0:
+			return IndirectResponse(VideoClipObject, key=video_url[0])
+
+	# If 360p, or fallback
+	video_url = html.xpath('//meta[@name="twitter:player:stream"]/@content')
+
+	if len(video_url) > 0:
+		return IndirectResponse(VideoClipObject, key=video_url[0])
+
+	raise Ex.MediaNotAvailable

@@ -1,0 +1,62 @@
+HTTP_HEADERS = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/36.0.1985.143 Safari/537.36'}
+HTTP_HEADERS_IPAD = {'User-Agent': 'Mozilla/5.0 (iPad; CPU OS 6_0_1 like Mac OS X) AppleWebKit/536.26 (KHTML, like Gecko) Version/6.0 Mobile/10A523 Safari/8536.25'}
+
+RE_YT_ID_1 = Regex("addVariable\(\"file\",\"http://www.youtube.com/watch\?v=([^\"]+)\"", Regex.DOTALL)
+#RE_YT_ID_2 = Regex("onYouTubePlayerAPIReady.+videoId: '([^']+)'", Regex.DOTALL)
+
+####################################################################################################
+def NormalizeURL(url):
+
+	return url
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	data = HTTP.Request(url, headers=HTTP_HEADERS).content
+	html = HTML.ElementFromString(data)
+
+	yt_iframe = html.xpath('//iframe[contains(@src, "youtube.com/embed")]/@src')
+
+	if len(yt_iframe) > 0:
+		return URLService.MetadataObjectForURL(yt_iframe[0])
+	elif RE_YT_ID_1.search(data):
+		return URLService.MetadataObjectForURL('http://www.youtube.com/watch?v=%s' % RE_YT_ID_1.search(data).group(1))
+#	elif RE_YT_ID_2.search(data):
+#		return URLService.MetadataObjectForURL('http://www.youtube.com/watch?v=%s' % RE_YT_ID_2.search(data).group(1))
+
+	title = html.xpath('//meta[@property="og:title"]/@content')[0]
+	summary = html.xpath('//meta[@property="og:description"]/@content')[0]
+	thumb = html.xpath('//meta[@property="og:image"]/@content')[0]
+
+	return VideoClipObject(
+		title = title,
+		summary = summary,
+		thumb = Resource.ContentsOfURLWithFallback(url=thumb)
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			parts = [PartObject(key=Callback(PlayVideo, url=url))],
+			container = Container.MP4,
+			video_codec = VideoCodec.H264,
+			video_resolution = 'sd',
+			audio_codec = AudioCodec.AAC,
+			audio_channels = 2,
+			optimized_for_streaming = True
+		)
+	]
+
+####################################################################################################
+@indirect
+def PlayVideo(url):
+
+	url = url.replace('http://www.', 'http://m.')
+	video = HTML.ElementFromURL(url, headers=HTTP_HEADERS_IPAD).xpath('//video/@src|//video/source/@src')
+
+	if len(video) < 1:
+		raise Ex.MediaNotAvailable
+
+	return IndirectResponse(VideoClipObject, key=video[0])

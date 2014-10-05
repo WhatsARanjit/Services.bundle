@@ -1,0 +1,124 @@
+MRSS_URL = 'http://www.tvland.com/feeds/mrss/?uri=%s'
+NAMESPACES = {'media': 'http://search.yahoo.com/mrss/'}
+MP4_URL = 'http://mtvnmobile.vo.llnwd.net/kip0/_pxn=0+_pxK=18639+_pxE=/44620/mtvnorigin/%s/%s'
+
+AudioStreamObject.language_code = Locale.Language.English
+
+####################################################################################################
+def NormalizeURL(url):
+
+	return url
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	data = GetRSS(url)
+	title = data.xpath('//title/text()')[0]
+	summary = data.xpath('//description/text()')[0]
+	thumb = data.xpath('//image/url/text()')[0]
+
+	try:
+		date = Datetime.ParseDate(data.xpath('//pubDate/text()')[0]).date()
+	except:
+		date = None
+
+	if '/episodes/' in url:
+		show_title = data.xpath('//media:category[@label="Show Name"]/text()', namespaces=NAMESPACES)
+
+		if len(show_title) > 0:
+			return EpisodeObject(
+				show = show_title[0],
+				title = title,
+				summary = summary,
+				thumb = Resource.ContentsOfURLWithFallback(url=thumb),
+				originally_available_at = date
+			)
+
+	return VideoClipObject(
+		title = title,
+		summary = summary,
+		thumb = Resource.ContentsOfURLWithFallback(url=thumb),
+		originally_available_at = date
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	if '/episodes/' in url:
+		num_parts = 6
+	else:
+		num_parts = 1
+
+	return [
+		MediaObject(
+			parts = [
+				PartObject(
+					key=Callback(PlayVideo, url=url, bitrate=str(bitrate), index=i)
+				) for i in range(num_parts)
+			],
+			bitrate = bitrate,
+			container = Container.MP4,
+			video_resolution = resolution,
+			video_codec = VideoCodec.H264,
+			audio_codec = AudioCodec.AAC,
+			audio_channels = 2,
+			optimized_for_streaming = True
+		) for bitrate,resolution in [(3500, '720'), (2200, '540'), (1700, '432'), (1200, '360')]
+	]
+
+####################################################################################################
+def PlayVideo(url, bitrate='3500', index=0, **kwargs):
+
+	mrss_data = GetRSS(url)
+	media_url = mrss_data.xpath('//media:content[@medium="video"]', namespaces=NAMESPACES)
+
+	if index < len(media_url):
+		player_url = media_url[index].get('url')
+	else:
+		# Return small filler movie
+		return Redirect('http://dl.dropbox.com/u/2974527/Plex/filler.mp4')
+
+	try:
+		player_data = XML.ElementFromURL(player_url)
+	except:
+		raise Ex.MediaNotAvailable
+
+	available_bitrates = player_data.xpath('//rendition[@bitrate]/@bitrate')
+	if len(available_bitrates) < 1:
+		raise Ex.MediaNotAvailable
+
+	closest = min((abs(int(bitrate) - int(i)), i) for i in available_bitrates)[1]
+	rtmp_url = player_data.xpath('//rendition[@bitrate="%s"]/src' % closest)[0].text
+
+	if '/gsp.alias/' in rtmp_url:
+		stream_url = rtmp_url.split('/gsp.alias/')[1]
+		mp4_url = MP4_URL % ('gsp.alias', stream_url)
+	elif '/gsp.tvlandcomstor/' in rtmp_url:
+		stream_url = rtmp_url.split('/gsp.tvlandcomstor/')[1]
+		mp4_url = MP4_URL % ('gsp.tvlandcomstor', stream_url)
+	else:
+		raise Ex.MediaNotAvailable
+
+	return Redirect(mp4_url)
+
+####################################################################################################
+def GetRSS(url):
+
+	try:
+		html = HTML.ElementFromURL(url, cacheTime=CACHE_1HOUR)
+	except:
+		raise Ex.MediaNotAvailable
+
+	video_player_box = html.xpath('//div[@id="video_player_box"]')
+
+	if len(video_player_box) < 1:
+		raise Ex.MediaExpired
+
+	uri = video_player_box[0].get('data-mgid')
+
+	try:
+		mrss_data = XML.ElementFromURL(MRSS_URL % uri)
+	except:
+		raise Ex.MediaNotAvailable
+
+	return mrss_data

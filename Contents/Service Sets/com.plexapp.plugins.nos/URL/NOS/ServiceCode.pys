@@ -1,0 +1,46 @@
+JSON_URL = 'http://nos.nl/playlist/%s/mp4-web03/%s.json'
+RE_ID = Regex('\/(?P<id>\d+)\-')
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	json_obj = GetJson(url)
+
+	return VideoClipObject(
+		title = json_obj['title'],
+		summary = json_obj['description'],
+		duration = int(json_obj['duration'])*1000,
+		thumb = Resource.ContentsOfURLWithFallback(json_obj['image'])
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			parts = [PartObject(key=Callback(PlayVideo, url=url))],
+			video_codec = VideoCodec.H264,
+			audio_codec = AudioCodec.AAC,
+			container = 'mp4',
+			video_resolution = 'sd',
+			audio_channels = 2
+		)
+	]
+
+####################################################################################################
+@indirect
+def PlayVideo(url):
+
+	json_obj = GetJson(url)
+	return IndirectResponse(VideoClipObject, key=json_obj['videofile'])
+
+####################################################################################################
+def GetJson(url):
+
+	if '/uitzendingen/' in url:
+		type = 'uitzending'
+	else:
+		type = 'video'
+
+	id = RE_ID.search(url).group('id')
+	return JSON.ObjectFromURL(JSON_URL % (type, id))

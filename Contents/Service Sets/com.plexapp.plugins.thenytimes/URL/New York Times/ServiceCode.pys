@@ -1,0 +1,64 @@
+RE_VIDEO_ID = Regex('\/(?P<video_id>\d{12,})\/')
+RE_VIDEO_ID_HASH = Regex('#(?P<video_id>\d+)')
+
+BC_VIDEO_BY_REFERENCE_URL = 'http://api.brightcove.com/services/library?command=find_video_by_reference_id&reference_id=%s&token=cE97ArV7TzqBzkmeRVVhJ8O6GWME2iG_bRvjBTlNb4o.&custom_fields=videourl'
+
+HTTP_HEADERS = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.8; rv:19.0) Gecko/20100101 Firefox/19.0'}
+
+####################################################################################################
+def NormalizeURL(url):
+
+	if RE_VIDEO_ID_HASH.search(url):
+		json_obj = JSON.ObjectFromURL(BC_VIDEO_BY_REFERENCE_URL % RE_VIDEO_ID_HASH.search(url).group('video_id'), cacheTime=CACHE_1WEEK)
+		url = json_obj['customFields']['videourl']
+
+	return url
+
+####################################################################################################
+def MetadataObjectForURL(url):
+
+	video_id = RE_VIDEO_ID.search(url).group('video_id')
+	json_obj = JSON.ObjectFromURL(BC_VIDEO_BY_REFERENCE_URL % video_id, cacheTime=CACHE_1WEEK)
+
+	return VideoClipObject(
+		title = json_obj['name'],
+		summary = json_obj['longDescription'],
+		originally_available_at = Datetime.FromTimestamp(float(json_obj['publishedDate']) / 1000),
+		duration = json_obj['length'],
+		thumb = Resource.ContentsOfURLWithFallback(json_obj['videoStillURL'])
+	)
+
+####################################################################################################
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			container = Container.MP4,
+			video_codec = VideoCodec.H264,
+			audio_codec = AudioCodec.AAC,
+			audio_channels = 2,
+			video_resolution = '576',
+			parts = [PartObject(key=Callback(PlayVideo, url=url, res=576))]
+		),
+		MediaObject(
+			container = Container.MP4,
+			video_codec = VideoCodec.H264,
+			audio_codec = AudioCodec.AAC,
+			audio_channels = 2,
+			video_resolution = '360',
+			parts = [PartObject(key=Callback(PlayVideo, url=url, res=360))]
+		)
+	]
+
+####################################################################################################
+@indirect
+def PlayVideo(url, res=576):
+
+	video_id = RE_VIDEO_ID.search(url).group('video_id')
+	json_obj = JSON.ObjectFromURL(BC_VIDEO_BY_REFERENCE_URL % video_id, cacheTime=CACHE_1WEEK)
+
+	for rendition in json_obj['renditions']:
+		if rendition['videoCodec'] == "H264" and rendition['frameHeight'] == int(res):
+			return IndirectResponse(VideoClipObject, key=rendition['url'])
+
+	return IndirectResponse(VideoClipObject, key=json_obj['FLVFullLength']['url'])
