@@ -8,6 +8,8 @@
 		<dict>
 			<key>URLPatterns</key>
 			<array>
+				<string>http://www\.movietube\.cc/watch\.php\?v=.+</string>
+				<string>http://www\.movietubenow\.com/watch\.php\?v=.+</string>
 				<string>http://m\.genvideos\.com/get_video\?.+</string>
 			</array>
 			<key>TestURLs</key>
